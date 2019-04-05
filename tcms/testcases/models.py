@@ -2,6 +2,7 @@
 from django.conf import settings
 from django.urls import reverse
 from django.db import models
+from django.utils.translation import override
 from django.db.models import ObjectDoesNotExist
 
 import vinaigrette
@@ -31,24 +32,19 @@ class TestCaseStatus(TCMSActionModel):
 
     @classmethod
     def get_proposed(cls):
-        try:
-            return cls.objects.get(name='PROPOSED')
-        except cls.DoesNotExist:
-            return None
+        return cls.objects.get(name='PROPOSED')
 
     @classmethod
     def get_confirmed(cls):
-        try:
-            return cls.objects.get(name='CONFIRMED')
-        except cls.DoesNotExist:
-            return None
+        return cls.objects.get(name='CONFIRMED')
 
     @classmethod
     def string_to_instance(cls, name):
         return cls.objects.get(name=name)
 
     def is_confirmed(self):
-        return self.name == 'CONFIRMED'
+        with override('en'):
+            return self.name == 'CONFIRMED'
 
 
 # register model for DB translations
@@ -347,7 +343,7 @@ class BugSystem(TCMSActionModel):
         Kiwi TCMS. Fields below can be configured via
         the admin interface and their meaning is:
 
-        #. **name:** a visual name for this bug tracker, e.g. `Kiwi TCMS GitHub';
+        #. **name:** a visual name for this bug tracker, e.g. `Kiwi TCMS GitHub`;
         #. **description:** a longer description shown in the admin;
         #. **url_reg_exp:** shown as **URL format string** in the UI - a format string
            used to construct URLs from bug IDs;
@@ -445,7 +441,7 @@ Leave empty to disable!
 
 class Bug(TCMSActionModel):
     bug_id = models.CharField(max_length=25)
-    case_run = models.ForeignKey('testruns.TestCaseRun', default=None, blank=True, null=True,
+    case_run = models.ForeignKey('testruns.TestExecution', default=None, blank=True, null=True,
                                  related_name='case_run_bug', on_delete=models.CASCADE)
     case = models.ForeignKey(TestCase, related_name='case_bug', on_delete=models.CASCADE)
     bug_system = models.ForeignKey(BugSystem, default=1, on_delete=models.CASCADE)
@@ -479,13 +475,13 @@ class Bug(TCMSActionModel):
 
 class TestCaseEmailSettings(models.Model):
     case = models.OneToOneField(TestCase, related_name='email_settings', on_delete=models.CASCADE)
-    notify_on_case_update = models.BooleanField(default=False)
-    notify_on_case_delete = models.BooleanField(default=False)
-    auto_to_case_author = models.BooleanField(default=False)
-    auto_to_case_tester = models.BooleanField(default=False)
-    auto_to_run_manager = models.BooleanField(default=False)
-    auto_to_run_tester = models.BooleanField(default=False)
-    auto_to_case_run_assignee = models.BooleanField(default=False)
+    notify_on_case_update = models.BooleanField(default=True)
+    notify_on_case_delete = models.BooleanField(default=True)
+    auto_to_case_author = models.BooleanField(default=True)
+    auto_to_case_tester = models.BooleanField(default=True)
+    auto_to_run_manager = models.BooleanField(default=True)
+    auto_to_run_tester = models.BooleanField(default=True)
+    auto_to_case_run_assignee = models.BooleanField(default=True)
 
     cc_list = models.TextField(default='')
 

@@ -435,55 +435,39 @@ AddIssueDialog.prototype.show = function () {
 
 AddIssueDialog.prototype.get_data = function () {
   var form_data = Nitrate.Utils.formSerialize(this.form);
-  form_data.bug_validation_regexp = jQ('#bug_system_id option:selected').data('validation-regexp');
+  form_data.bug_validation_regexp = $('#bug_system_id option:selected').data('validation-regexp');
+  form_data.bz_external_track = $('input[name=bz_external_track]').is(':checked');
   return form_data;
 };
 
 //// end of AddIssueDialog definition /////////
 /////////////////////////////////////////////////////////////////////////////////////////////
 
-function getIssueTrackerNewURL() {
-}
-
-function fileCaseRunBug(run_id, title_container, container, case_id, case_run_id, callback) {
+function fileCaseRunBug(run_id, title_container, container, case_id, case_run_id) {
   var dialog = new AddIssueDialog({
     'action': 'Report',
-    'a': 'file',
-    'extraFormHiddenData': { 'case_run': case_run_id, 'case': case_id },
     'onSubmit': function (e, dialog) {
       e.stopPropagation();
       e.preventDefault();
 
-      form_data = dialog.get_data();
+        var tracker_id = dialog.get_data()['bug_system_id'];
+        jsonRPC('Bug.report', [case_run_id, tracker_id], function(result) {
+            $('#dialog').hide();
 
-      var success_callback = function(t) {
-        jQ('#dialog').hide();
-        var returnobj = t;
-
-        if (returnobj.rc === 0) {
-          if (callback) {
-            return callback();
-          }
-
-          window.open(returnobj.response, '_blank');
-          return true;
-        } else {
-          window.alert(returnobj.response);
-          return false;
-        }
-      };
-
-      var url = Nitrate.http.URLConf.reverse({ 'name': 'case_run_bug', 'arguments': {'id': case_run_id} });
-      jQ.ajax({ url: url, dataType: 'json', data: form_data, success: success_callback });
+            if (result.rc === 0) {
+                window.open(result.response, '_blank');
+            } else {
+                window.alert(result.response);
+            }
+      });
     }
   });
 
   dialog.show();
 }
 
-function addCaseRunBug(run_id, title_container, container, case_id, case_run_id, callback) {
+function addCaseRunBug(run_id, title_container, container, case_id, case_run_id) {
   var dialog = new AddIssueDialog({
-    'extraFormHiddenData': { 'case_run': case_run_id, 'case': case_id },
     'onSubmit': function (e, dialog) {
       e.stopPropagation();
       e.preventDefault();
@@ -495,46 +479,23 @@ function addCaseRunBug(run_id, title_container, container, case_id, case_run_id,
         return;
       }
 
-      if (!validateIssueID(form_data.bug_validation_regexp, form_data.bug_id)) {
-        return false;
-      }
+        jsonRPC('Bug.create', [{
+                case_id: case_id,
+                case_run_id: case_run_id,
+                bug_id: form_data.bug_id,
+                bug_system_id: form_data.bug_system_id
+            }, form_data.bz_external_track],
+            function(result) {
+                // todo: missing error handling when bz_external_track is true
+                $('#dialog').hide();
 
-      var success_callback = function(t) {
-        jQ('#dialog').hide();
-        var returnobj = t;
+                // Update bugs count associated with just updated case run
+                var jqCaserunBugCount = $('span#' + case_run_id + '_case_bug_count');
+                jqCaserunBugCount.addClass('have_bug');
 
-        if (returnobj.rc === 0) {
-          if (callback) {
-            return callback();
-          }
-
-          // Update bugs count associated with just updated case run
-          var jqCaserunBugCount = jQ('span#' + case_run_id + '_case_bug_count');
-          if (jqCaserunBugCount.text() == '0') {
-            jqCaserunBugCount.addClass('have_bug');
-          }
-          jqCaserunBugCount.text(returnobj.caserun_bugs_count);
-
-          // Update the total bugs count of this run
-          var html = null;
-          if (jQ('span#total_run_bug_count a').text() === 'No Bugs') {
-            html = "<a title='Show All Bugs' href='/runs/" + run_id + "/report/#buglist'>Bugs [" + returnobj.run_bug_count + "]</a>";
-            jQ('span#total_run_bug_count').html(html);
-          } else {
-            html = "Bugs [" + returnobj.run_bug_count + "]";
-            jQ('span#total_run_bug_count a').html(html);
-          }
-
-          return constructCaseRunZone(container, title_container, case_id);
-        } else {
-          window.alert(returnobj.response);
-          return false;
-        }
-      };
-
-      var url = Nitrate.http.URLConf.reverse({ 'name': 'case_run_bug', 'arguments': {'id': case_run_id} });
-
-      jQ.ajax({ url: url, dataType: 'json', data: form_data, success: success_callback });
+                // refresh the links of bugs
+                constructCaseRunZone(container, title_container, case_id);
+        });
     }
   });
 

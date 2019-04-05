@@ -3,11 +3,12 @@
 from datetime import datetime
 from xmlrpc.client import ProtocolError
 
+from django.test import override_settings
 from django.contrib.auth.models import Permission
 
-from tcms_api.xmlrpc import TCMSXmlrpc
+from tcms_api import xmlrpc
 
-from tcms.testruns.models import TestRun, TestCaseRun
+from tcms.testruns.models import TestRun, TestExecution
 
 from tcms.tests import remove_perm_from_user
 from tcms.tests.factories import TestCaseFactory, BuildFactory
@@ -36,7 +37,7 @@ class TestAddCase(XmlrpcAPIBaseTest):
         result = self.rpc_client.exec.TestRun.add_case(self.test_run.pk, self.test_case.pk)
         self.assertTrue(isinstance(result, dict))
 
-        test_case_run = TestCaseRun.objects.get(run=self.test_run.pk, case=self.test_case.pk)
+        test_case_run = TestExecution.objects.get(run=self.test_run.pk, case=self.test_case.pk)
         self.assertEqual(test_case_run.pk, result['case_run_id'])
         self.assertEqual(test_case_run.case.pk, result['case_id'])
         self.assertEqual(test_case_run.run.pk, result['run_id'])
@@ -47,16 +48,16 @@ class TestAddCase(XmlrpcAPIBaseTest):
         unauthorized_user.save()
 
         unauthorized_user.user_permissions.add(*Permission.objects.all())
-        remove_perm_from_user(unauthorized_user, 'testruns.add_testcaserun')
+        remove_perm_from_user(unauthorized_user, 'testruns.add_testexecution')
 
-        rpc_client = TCMSXmlrpc(unauthorized_user.username,
-                                'api-testing',
-                                '%s/xml-rpc/' % self.live_server_url).server
+        rpc_client = xmlrpc.TCMSXmlrpc(unauthorized_user.username,
+                                       'api-testing',
+                                       '%s/xml-rpc/' % self.live_server_url).server
 
         with self.assertRaisesRegex(ProtocolError, '403 Forbidden'):
             rpc_client.TestRun.add_case(self.test_run.pk, self.test_case.pk)
 
-        exists = TestCaseRun.objects.filter(run=self.test_run.pk, case=self.test_case.pk).exists()
+        exists = TestExecution.objects.filter(run=self.test_run.pk, case=self.test_case.pk).exists()
         self.assertFalse(exists)
 
 
@@ -96,9 +97,9 @@ class TestAddTag(XmlrpcAPIBaseTest):
         unauthorized_user.user_permissions.add(*Permission.objects.all())
         remove_perm_from_user(unauthorized_user, 'testruns.add_testruntag')
 
-        rpc_client = TCMSXmlrpc(unauthorized_user.username,
-                                'api-testing',
-                                '%s/xml-rpc/' % self.live_server_url).server
+        rpc_client = xmlrpc.TCMSXmlrpc(unauthorized_user.username,
+                                       'api-testing',
+                                       '%s/xml-rpc/' % self.live_server_url).server
 
         with self.assertRaisesRegex(ProtocolError, '403 Forbidden'):
             rpc_client.TestRun.add_tag(self.test_runs[0].pk, self.tag0.name)
@@ -151,9 +152,9 @@ class TestRemoveTag(XmlrpcAPIBaseTest):
         unauthorized_user.user_permissions.add(*Permission.objects.all())
         remove_perm_from_user(unauthorized_user, 'testruns.delete_testruntag')
 
-        rpc_client = TCMSXmlrpc(unauthorized_user.username,
-                                'api-testing',
-                                '%s/xml-rpc/' % self.live_server_url).server
+        rpc_client = xmlrpc.TCMSXmlrpc(unauthorized_user.username,
+                                       'api-testing',
+                                       '%s/xml-rpc/' % self.live_server_url).server
 
         with self.assertRaisesRegex(ProtocolError, '403 Forbidden'):
             rpc_client.TestRun.remove_tag(self.test_runs[0].pk, self.tag0.name)
@@ -205,6 +206,7 @@ class TestProductVersionWhenCreating(XmlrpcAPIBaseTest):
         self.assertEqual(result['product_version'], self.plan.product_version.value)
 
 
+@override_settings(LANGUAGE_CODE='en-us')
 class TestUpdateTestRun(XmlrpcAPIBaseTest):
     def _fixture_setup(self):
         super()._fixture_setup()

@@ -48,7 +48,7 @@ class IssueTrackerType:
     def report_issue_from_testcase(self, caserun):
         """
             When marking Test Case results inside a Test Run there is a
-            'Report' link. When the `Report' link is clicked this method is called
+            `Report` link. When the `Report` link is clicked this method is called
             to help the user report an issue in the IT.
 
             This is implemented by constructing an URL string which will pre-fill
@@ -76,6 +76,10 @@ class IssueTrackerType:
         raise NotImplementedError()
 
     # pylint: disable = invalid-name, no-self-use
+    # todo: we should allow this method to raise and the specific error
+    # message must be returned to the caller instead of generic one.
+    # as it is LinkOnly tracker doesn't have any integrations but the error
+    # message is misleading
     def is_adding_testcase_to_issue_disabled(self):
         """
             When is linking a TC to a Bug report disabled?
@@ -378,3 +382,15 @@ class Gitlab(IssueTrackerType):
             url += '/'
 
         return url + '/issues/new?' + urlencode(args, True)
+
+
+class LinkOnly(IssueTrackerType):
+    """
+        Allow only linking issues to TestExecution records. Can be used when your
+        issue tracker is not integrated with Kiwi TCMS.
+
+        No additional API integration available!
+    """
+
+    def is_adding_testcase_to_issue_disabled(self):
+        return True

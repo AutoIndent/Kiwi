@@ -7,10 +7,10 @@ Most of these functions are use for Ajax.
 from http import HTTPStatus
 
 from django.db.models import Count
-from django.contrib.auth.models import User
 from django.forms import ValidationError
 from django.http import JsonResponse
 from django.views.generic.base import View
+from django.contrib.auth import get_user_model
 from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 from django.shortcuts import render
@@ -20,7 +20,7 @@ from django.contrib.auth.decorators import permission_required
 from tcms.testcases.models import TestCase, Bug
 from tcms.testcases.models import TestCaseTag
 from tcms.testplans.models import TestPlan, TestPlanTag
-from tcms.testruns.models import TestCaseRun, TestRunTag
+from tcms.testruns.models import TestExecution, TestRunTag
 from tcms.core.helpers.comments import add_comment
 from tcms.core.utils.validations import validate_bug_id
 
@@ -147,6 +147,7 @@ class UpdateTestCaseActorsView(View):
 
     def post(self, request):
         username = request.POST.get('username')
+        User = get_user_model()  # pylint: disable=invalid-name
         try:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
@@ -185,7 +186,7 @@ def comment_case_runs(request):
             run_ids.append(run_id)
     if not run_ids:
         return say_no('No runs selected.')
-    runs = TestCaseRun.objects.filter(pk__in=run_ids).only('pk')
+    runs = TestExecution.objects.filter(pk__in=run_ids).only('pk')
     if not runs:
         return say_no('No caserun found.')
     add_comment(runs, comment, request.user)
@@ -227,7 +228,7 @@ def update_bugs_to_caseruns(request):
     data, error = clean_bug_form(request)
     if error:
         return say_no(error)
-    runs = TestCaseRun.objects.filter(pk__in=data['runs'])
+    runs = TestExecution.objects.filter(pk__in=data['runs'])
     bug_system_id = data['bug_system_id']
     bug_ids = data['bugs']
 
@@ -242,6 +243,8 @@ def update_bugs_to_caseruns(request):
         if action == "add":
             for run in runs:
                 for bug_id in bug_ids:
+                    # todo: TestCaseRun.add_bug and TestCase.add_bug should be removed
+                    # once this function has been refactored to JSON RPC
                     run.add_bug(bug_id=bug_id,
                                 bug_system_id=bug_system_id,
                                 bz_external_track=bz_external_track)

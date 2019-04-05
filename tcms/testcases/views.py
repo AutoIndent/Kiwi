@@ -10,6 +10,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.urls import reverse
 from django.http import HttpResponseRedirect, Http404
 from django.shortcuts import get_object_or_404, render
+from django.utils.decorators import method_decorator
 from django.utils.translation import ugettext_lazy as _
 from django.views.decorators.http import require_GET
 from django.views.decorators.http import require_POST
@@ -22,11 +23,10 @@ from tcms.testcases.models import TestCase, TestCaseStatus, \
     TestCasePlan
 from tcms.management.models import Priority, Tag
 from tcms.testplans.models import TestPlan
-from tcms.testruns.models import TestCaseRun
-from tcms.testruns.models import TestCaseRunStatus
+from tcms.testruns.models import TestExecution
+from tcms.testruns.models import TestExecutionStatus
 from tcms.testcases.forms import NewCaseForm, \
-    SearchCaseForm, EditCaseForm, CaseNotifyForm, \
-    CloneCaseForm
+    SearchCaseForm, CaseNotifyForm, CloneCaseForm
 from tcms.testplans.forms import SearchPlanForm
 from tcms.testcases.fields import MultipleEmailField
 
@@ -94,108 +94,67 @@ def group_case_bugs(bugs):
     return grouped_bugs
 
 
-def create_testcase(request, form, test_plan):
-    """Create testcase"""
-    test_case = TestCase.create(author=request.user, values=form.cleaned_data)
+@method_decorator(permission_required('testcases.add_testcase'), name='dispatch')
+class NewCaseView(TemplateView):
 
-    # Assign the case to the plan
-    if test_plan:
-        test_plan.add_case(test_case)
+    template_name = 'testcases/mutable.html'
 
-    # Add components into the case
-    for component in form.cleaned_data['component']:
-        test_case.add_component(component=component)
-    return test_case
+    def get(self, request, *args, **kwargs):
+        test_plan = plan_from_request_or_none(request)
 
+        default_form_parameters = {}
+        if test_plan:
+            default_form_parameters['product'] = test_plan.product_id
 
-class ReturnActions:
-    all_actions = ('_addanother', '_continue', 'returntocase', '_returntoplan')
+        form = NewCaseForm(initial=default_form_parameters)
 
-    def __init__(self, case, plan, default_form_parameters):
-        self.case = case
-        self.plan = plan
-        self.default_form_parameters = default_form_parameters
+        context_data = {
+            'test_plan': test_plan,
+            'form': form,
+            'notify_form': CaseNotifyForm(),
+        }
 
-    def _continue(self):
-        if self.plan:
-            return HttpResponseRedirect(
-                '%s?from_plan=%s' % (reverse('testcases-edit',
-                                             args=[self.case.case_id]),
-                                     self.plan.plan_id))
+        return render(request, self.template_name, context_data)
 
-        return HttpResponseRedirect(
-            reverse('testcases-edit', args=[self.case.case_id]))
+    def post(self, request, *args, **kwargs):
+        test_plan = plan_from_request_or_none(request)
 
-    def _addanother(self):
-        form = NewCaseForm(initial=self.default_form_parameters)
-
-        if self.plan:
-            form.populate(product_id=self.plan.product_id)
-
-        return form
-
-    def returntocase(self):
-        if self.plan:
-            return HttpResponseRedirect(
-                '%s?from_plan=%s' % (reverse('testcases-get',
-                                             args=[self.case.pk]),
-                                     self.plan.plan_id))
-
-        return HttpResponseRedirect(
-            reverse('testcases-get', args=[self.case.pk]))
-
-    def _returntoplan(self):
-        if not self.plan:
-            raise Http404
-
-        return HttpResponseRedirect(
-            '%s#reviewcases' % reverse('test_plan_url_short',
-                                       args=[self.plan.pk]))
-
-
-@permission_required('testcases.add_testcase')
-def new(request):
-    """New testcase"""
-    test_plan = plan_from_request_or_none(request)
-    default_form_parameters = {}
-    if test_plan:
-        default_form_parameters['product'] = test_plan.product_id
-
-    if request.method == "POST":
         form = NewCaseForm(request.POST)
         if request.POST.get('product'):
             form.populate(product_id=request.POST['product'])
         else:
             form.populate()
 
-        if form.is_valid():
-            test_case = create_testcase(request, form, test_plan)
-            # Generate the instance of actions
-            ras = ReturnActions(test_case, test_plan, default_form_parameters)
-            for ra_str in ras.all_actions:
-                if request.POST.get(ra_str):
-                    func = getattr(ras, ra_str)
-                    break
-            else:
-                func = ras.returntocase
+        notify_form = CaseNotifyForm(request.POST)
 
-            # Get the function and return back
-            result = func()
-            if isinstance(result, HttpResponseRedirect):
-                return result
-            # Assume here is the form
-            form = result
+        if form.is_valid() and notify_form.is_valid():
+            test_case = self.create_test_case(form, notify_form, test_plan)
+            if test_plan:
+                return HttpResponseRedirect(
+                    '%s?from_plan=%s' % (reverse('testcases-get', args=[test_case.pk]),
+                                         test_plan.pk))
 
-    # Initial NewCaseForm for submit
-    else:
-        test_plan = plan_from_request_or_none(request)
-        form = NewCaseForm(initial=default_form_parameters)
+            return HttpResponseRedirect(reverse('testcases-get', args=[test_case.pk]))
 
-    context_data = {
-        'test_plan': test_plan,
-        'form': form
-    }
-    return render(request, 'testcases/mutable.html', context_data)
+        context_data = {
+            'test_plan': test_plan,
+            'form': form,
+            'notify_form': notify_form
+        }
+
+        return render(request, self.template_name, context_data)
+
+    def create_test_case(self, form, notify_form, test_plan):
+        """Create new test case"""
+        test_case = TestCase.create(author=self.request.user, values=form.cleaned_data)
+
+        # Assign the case to the plan
+        if test_plan:
+            test_plan.add_case(test_case)
+
+        update_case_email_settings(test_case, notify_form)
+
+        return test_case
 
 
 def get_testcaseplan_sortkey_pk_for_testcases(plan, tc_ids):
@@ -216,10 +175,9 @@ def calculate_for_testcases(plan, testcases):
     Attach TestCasePlan.sortkey, TestCasePlan.pk, and the number of bugs of
     each TestCase.
 
-    Arguments:
-    - plan: the TestPlan containing searched TestCases. None means testcases
-      are not limited to a specific TestPlan.
-    - testcases: a queryset of TestCases.
+    :param plan: the TestPlan containing searched TestCases. None means testcases
+                 are not limited to a specific TestPlan.
+    :param testcases: a queryset of TestCases.
     """
     tc_ids = []
     for test_case in testcases:
@@ -332,12 +290,11 @@ def sort_queried_testcases(request, testcases):
 def query_testcases_from_request(request, plan=None):
     """Query TestCases according to criterias coming within REQUEST
 
-    Arguments:
-    - request: the REQUEST object.
-    - plan: instance of TestPlan to restrict only those TestCases belongs to
-      the TestPlan. Can be None. As you know, query from all TestCases.
+    :param request: the REQUEST object.
+    :param plan: instance of TestPlan to restrict only those TestCases belongs to
+                 the TestPlan. Can be None. As you know, query from all TestCases.
     """
-    search_form = build_cases_search_form(request)
+    search_form = build_cases_search_form(request, True, plan)
 
     action = request.POST.get('a')
     if action == 'initial':
@@ -433,12 +390,6 @@ def get_tags_from_cases(case_ids, plan=None):
 def list_all(request):
     """
     Generate the TestCase list for the UI tabs in TestPlan page view.
-
-    POST Parameters:
-    from_plan: Plan ID
-       -- [number]: When the plan ID defined, it will build the case
-    page in plan.
-
     """
     # Intial the plan in plan details page
     test_plan = plan_from_request_or_none(request)
@@ -560,7 +511,7 @@ class TestCaseCaseRunDetailPanelView(TemplateView):
         data = super().get_context_data(**kwargs)
 
         case = TestCase.objects.get(pk=kwargs['case_id'])
-        case_run = TestCaseRun.objects.get(pk=self.caserun_id)
+        case_run = TestExecution.objects.get(pk=self.caserun_id)
 
         # Data of TestCase
         test_case_text = case.get_text_with_version(self.case_text_version)
@@ -568,7 +519,7 @@ class TestCaseCaseRunDetailPanelView(TemplateView):
         # Data of TestCaseRun
         caserun_comments = get_comments(case_run)
 
-        caserun_status = TestCaseRunStatus.objects.values('pk', 'name')
+        caserun_status = TestExecutionStatus.objects.values('pk', 'name')
         caserun_status = caserun_status.order_by('pk')
         bugs = group_case_bugs(case_run.case.get_bugs().order_by('bug_id'))
 
@@ -611,16 +562,18 @@ def get(request, case_id):
     }
 
     url_params = "?case=%d" % test_case.pk
+    case_edit_url = reverse('testcases-edit', args=[test_case.pk])
     test_plan = request.GET.get('from_plan', 0)
     if test_plan:
         url_params += "&from_plan=%s" % test_plan
+        case_edit_url += "?from_plan=%s" % test_plan
 
     with modify_settings(
             MENU_ITEMS={'append': [
                 ('...', [
                     (
                         _('Edit'),
-                        reverse('testcases-edit', args=[test_case.pk])
+                        case_edit_url
                     ),
                     (
                         _('Clone'),
@@ -634,9 +587,7 @@ def get(request, case_id):
                     (
                         _('Delete'),
                         reverse('admin:testcases_testcase_delete', args=[test_case.pk])
-                    )])]
-            }
-         ):
+                    )])]}):
         return render(request, 'testcases/get.html', context_data)
 
 
@@ -669,7 +620,7 @@ def printable(request, template_name='case/printable.html'):
             test_plan = None
 
     tcs = TestCase.objects.filter(**case_filter).values(
-            'case_id', 'summary', 'text'
+        'case_id', 'summary', 'text'
     ).order_by('case_id')
 
     context_data = {
@@ -714,18 +665,11 @@ def update_testcase(request, test_case, tc_form):
     except ObjectDoesNotExist:
         pass
 
-    # IMPORTANT! test_case.current_user is an instance attribute,
-    # added so that in post_save, current logged-in user info
-    # can be accessed.
-    # Instance attribute is usually not a desirable solution.
-    # TODO: current_user is probbably not necessary now that we have proper history
-    # it is used in email templates though !!!
-    test_case.current_user = request.user
     test_case.save()
 
 
 @permission_required('testcases.change_testcase')
-def edit(request, case_id, template_name='case/edit.html'):
+def edit(request, case_id):
     """Edit case detail"""
     try:
         test_case = TestCase.objects.select_related().get(case_id=case_id)
@@ -733,9 +677,12 @@ def edit(request, case_id, template_name='case/edit.html'):
         raise Http404
 
     test_plan = plan_from_request_or_none(request)
+    from_plan = ""
+    if test_plan:
+        from_plan = "?from_plan=%d" % test_plan.pk
 
     if request.method == "POST":
-        form = EditCaseForm(request.POST)
+        form = NewCaseForm(request.POST)
         if request.POST.get('product'):
             form.populate(product_id=request.POST['product'])
         elif test_plan:
@@ -746,58 +693,12 @@ def edit(request, case_id, template_name='case/edit.html'):
         n_form = CaseNotifyForm(request.POST)
 
         if form.is_valid() and n_form.is_valid():
-
             update_testcase(request, test_case, form)
-
-            # Notification
             update_case_email_settings(test_case, n_form)
 
-            # Returns
-            if request.POST.get('_continue'):
-                return HttpResponseRedirect('%s?from_plan=%s' % (
-                    reverse('testcases-edit', args=[case_id, ]),
-                    request.POST.get('from_plan', None),
-                ))
-
-            if request.POST.get('_continuenext'):
-                if not test_plan:
-                    raise Http404
-
-                # find out test case list which belong to the same
-                # classification
-                confirm_status_name = 'CONFIRMED'
-                if test_case.case_status.name == confirm_status_name:
-                    pk_list = test_plan.case.filter(
-                        case_status__name=confirm_status_name)
-                else:
-                    pk_list = test_plan.case.exclude(
-                        case_status__name=confirm_status_name)
-                pk_list = list(pk_list.defer('case_id').values_list('pk', flat=True))
-                pk_list.sort()
-
-                # Get the next case
-                _prev_case, next_case = test_case.get_previous_and_next(pk_list=pk_list)
-                return HttpResponseRedirect('%s?from_plan=%s' % (
-                    reverse('testcases-edit', args=[next_case.pk, ]),
-                    test_plan.pk,
-                ))
-
-            if request.POST.get('_returntoplan'):
-                if not test_plan:
-                    raise Http404
-                confirm_status_name = 'CONFIRMED'
-                if test_case.case_status.name == confirm_status_name:
-                    return HttpResponseRedirect('%s#testcases' % (
-                        reverse('test_plan_url_short', args=[test_plan.pk, ]),
-                    ))
-                return HttpResponseRedirect('%s#reviewcases' % (
-                    reverse('test_plan_url_short', args=[test_plan.pk, ]),
-                ))
-
-            return HttpResponseRedirect('%s?from_plan=%s' % (
-                reverse('testcases-get', args=[case_id, ]),
-                request.POST.get('from_plan', None),
-            ))
+            return HttpResponseRedirect(
+                reverse('testcases-get', args=[case_id, ]) + from_plan
+            )
 
     else:
         # Notification form initial
@@ -821,7 +722,7 @@ def edit(request, case_id, template_name='case/edit.html'):
         if test_case.default_tester_id:
             default_tester = test_case.default_tester.email
 
-        form = EditCaseForm(initial={
+        form = NewCaseForm(initial={
             'summary': test_case.summary,
             'default_tester': default_tester,
             'requirement': test_case.requirement,
@@ -834,7 +735,6 @@ def edit(request, case_id, template_name='case/edit.html'):
             'product': test_case.category.product_id,
             'category': test_case.category_id,
             'notes': test_case.notes,
-            'component': components,
             'text': test_case.text,
         })
 
@@ -846,7 +746,7 @@ def edit(request, case_id, template_name='case/edit.html'):
         'form': form,
         'notify_form': n_form,
     }
-    return render(request, template_name, context_data)
+    return render(request, 'testcases/mutable.html', context_data)
 
 
 @permission_required('testcases.add_testcase')

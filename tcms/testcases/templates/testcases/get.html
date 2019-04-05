@@ -25,9 +25,9 @@
     <div class="col-xs-12 col-sm-12 col-md-9">
         <div class="card-pf card-pf-accented">
             <div class="card-pf-body">
-                <p>
+                <div class="markdown-text">
                     {{ test_case.text|markdown2html }}
-                </p>
+                </div>
 
                 <p>
                     <strong>{% trans 'Notes' %}:</strong>
@@ -196,11 +196,11 @@
                                                     {% endif %}
                                                     <div class="list-view-pf-additional-info-item">
                                                         <span class="pficon pficon-user"></span>
-                                                        <a href="#">atodorov</a>
+                                                        <a href="#">{{ execution.tested_by }}</a>
                                                     </div>
                                                     <div class="list-view-pf-additional-info-item">
                                                         <span class="fa fa-calendar-o"></span>
-                                                        Ян. 13, 2019, 9:54 след обяд
+                                                        {{ execution.close_date }}
                                                     </div>
                                                 </div>
                                             </div>

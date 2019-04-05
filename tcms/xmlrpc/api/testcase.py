@@ -8,10 +8,10 @@ from tcms.core.utils import form_errors_to_list
 from tcms.management.models import Tag
 from tcms.management.models import Component
 from tcms.testcases.models import TestCase
+
+from tcms.xmlrpc import utils
 from tcms.xmlrpc.forms import UpdateCaseForm, NewCaseForm
-
 from tcms.xmlrpc.decorators import permissions_required
-
 
 __all__ = (
     'create',
@@ -29,6 +29,9 @@ __all__ = (
 
     'add_tag',
     'remove_tag',
+
+    'add_attachment',
+    'list_attachments',
 )
 
 
@@ -281,7 +284,7 @@ def create(values, **kwargs):
 
 
 @rpc_method(name='TestCase.filter')
-def filter(query):  # pylint: disable=redefined-builtin
+def filter(query=None):  # pylint: disable=redefined-builtin
     """
     .. function:: XML-RPC TestCase.filter(query)
 
@@ -293,17 +296,15 @@ def filter(query):  # pylint: disable=redefined-builtin
         :return: Serialized list of :class:`tcms.testcases.models.TestCase` objects.
         :rtype: list(dict)
     """
-    results = []
-    for case in TestCase.objects.filter(**query).distinct():
-        serialized_case = case.serialize()
-        results.append(serialized_case)
+    if query is None:
+        query = {}
 
-    return results
+    return TestCase.to_xmlrpc(query)
 
 
 @permissions_required('testcases.change_testcase')
 @rpc_method(name='TestCase.update')
-def update(case_id, values, **kwargs):
+def update(case_id, values):
     """
     .. function:: XML-RPC TestCase.update(case_id, values)
 
@@ -360,3 +361,46 @@ def remove(query):
             })
     """
     return TestCase.objects.filter(**query).delete()
+
+
+@permissions_required('attachments.view_attachment')
+@rpc_method(name='TestCase.list_attachments')
+def list_attachments(case_id, **kwargs):
+    """
+    .. function:: XML-RPC TestCase.list_attachments(case_id)
+
+        List attachments for the given TestCase.
+
+        :param case_id: PK of TestCase to inspect
+        :type case_id: int
+        :return: A list containing information and download URLs for attachements
+        :rtype: list
+        :raises: TestCase.DoesNotExit if object specified by PK is missing
+    """
+    case = TestCase.objects.get(pk=case_id)
+    request = kwargs.get(REQUEST_KEY)
+    return utils.get_attachments_for(request, case)
+
+
+@permissions_required('attachments.add_attachment')
+@rpc_method(name='TestCase.add_attachment')
+def add_attachment(case_id, filename, b64content, **kwargs):
+    """
+    .. function:: XML-RPC TestCase.add_attachment(case_id, filename, b64content)
+
+        Add attachment to the given TestCase.
+
+        :param case_id: PK of TestCase
+        :type case_id: int
+        :param filename: File name of attachment, e.g. 'logs.txt'
+        :type filename: str
+        :param b64content: Base64 encoded content
+        :type b64content: str
+        :return: None
+    """
+    utils.add_attachment(
+        case_id,
+        'testcases.TestCase',
+        kwargs.get(REQUEST_KEY).user,
+        filename,
+        b64content)

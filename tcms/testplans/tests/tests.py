@@ -7,8 +7,8 @@ from uuslug import slugify
 
 from django import test
 from django.conf import settings
-from django.contrib.auth.models import User
 from django.urls import reverse
+from django.utils.translation import ugettext_lazy as _
 
 from tcms.management.models import Product
 from tcms.management.models import Version
@@ -88,7 +88,7 @@ class PlanTests(BasePlanTest):
     def test_plan_printable_without_selected_plan(self):
         location = reverse('plans-printable')
         response = self.client.post(location, follow=True)
-        self.assertContains(response, 'At least one test plan is required for print')
+        self.assertContains(response, _('At least one test plan is required for print'))
 
     def test_plan_printable(self):
         location = reverse('plans-printable')
@@ -135,6 +135,27 @@ class TestPlanModel(test.TestCase):
         self.assertEqual(1, cases_left.count())
         self.assertEqual(self.testcase_2.pk, cases_left[0].case.pk)
 
+    def test_add_cases_sortkey_autoincrement(self):
+        """
+        When you add new cases, each new case should get a sortkey of the
+        highest sortkey in the database + 10.
+
+        The first case should get sortkey 0. The offset between the sortkeys is
+        to leave space to insert cases in between without having to update all
+        cases.
+        """
+
+        plan = TestPlanFactory()
+
+        for sequence_no in range(3):
+            case_plan = plan.add_case(TestCaseFactory())
+            self.assertEqual(sequence_no * 10, case_plan.sortkey)
+
+        # Check if you can still specify a sortkey manually to insert a case in
+        # between the other cases.
+        case_plan = plan.add_case(TestCaseFactory(), sortkey=15)
+        self.assertEqual(15, case_plan.sortkey)
+
 
 class TestDeleteCasesFromPlan(BasePlanCase):
     """Test case for deleting cases from a plan"""
@@ -142,7 +163,7 @@ class TestDeleteCasesFromPlan(BasePlanCase):
     @classmethod
     def setUpTestData(cls):
         super(TestDeleteCasesFromPlan, cls).setUpTestData()
-        cls.plan_tester = User(username='tester')
+        cls.plan_tester = UserFactory(username='tester')
         cls.plan_tester.set_password('password')
         cls.plan_tester.save()
 
@@ -180,7 +201,7 @@ class TestSortCases(BasePlanCase):
     @classmethod
     def setUpTestData(cls):
         super(TestSortCases, cls).setUpTestData()
-        cls.plan_tester = User(username='tester')
+        cls.plan_tester = UserFactory(username='tester')
         cls.plan_tester.set_password('password')
         cls.plan_tester.save()
 
@@ -238,7 +259,7 @@ class TestLinkCases(BasePlanCase):
             reviewer=cls.tester,
             plan=[cls.another_plan])
 
-        cls.plan_tester = User(username='tester')
+        cls.plan_tester = UserFactory(username='tester')
         cls.plan_tester.set_password('password')
         cls.plan_tester.save()
 
@@ -387,10 +408,9 @@ class TestCloneView(BasePlanCase):
             author=cls.tester, default_tester=None,
             reviewer=cls.tester, plan=[cls.totally_new_plan])
 
-        cls.plan_tester = User.objects.create_user(  # nosec:B106:hardcoded_password_funcarg
-            username='plan_tester',
-            email='tester@example.com',
-            password='password')
+        cls.plan_tester = UserFactory()
+        cls.plan_tester.set_password('password')
+        cls.plan_tester.save()
         user_should_have_perm(cls.plan_tester, 'testplans.add_testplan')
         cls.plan_clone_url = reverse('plans-clone')
 
@@ -401,7 +421,7 @@ class TestCloneView(BasePlanCase):
 
         data_missing_plan = {}  # No plan is passed
         response = self.client.post(self.plan_clone_url, data_missing_plan, follow=True)
-        self.assertContains(response, 'TestPlan is required')
+        self.assertContains(response, _('TestPlan is required'))
 
     def test_refuse_if_given_nonexisting_plan(self):
         self.client.login(  # nosec:B106:hardcoded_password_funcarg
@@ -420,7 +440,7 @@ class TestCloneView(BasePlanCase):
 
         self.assertContains(
             response,
-            '<label class="strong" for="id_name">New Plan Name</label>',
+            '<label class="strong" for="id_name">%s</label>' % _('New Plan Name'),
             html=True)
 
         self.assertContains(

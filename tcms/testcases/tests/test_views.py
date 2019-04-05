@@ -8,17 +8,28 @@ from urllib.parse import urlencode
 from django.urls import reverse
 from django.forms import ValidationError
 from django.test import RequestFactory
+from django.utils.translation import override
+from django.utils.translation import ugettext_lazy as _
 
 from tcms.testcases.fields import MultipleEmailField
 from tcms.management.models import Priority, Tag
-from tcms.testcases.models import TestCase
+from tcms.testcases.models import TestCase, TestCasePlan
 from tcms.testcases.views import get_selected_testcases
-from tcms.testruns.models import TestCaseRunStatus
+from tcms.testruns.models import TestExecutionStatus
 from tcms.tests.factories import BugFactory
 from tcms.tests.factories import TestCaseFactory
-from tcms.tests import BasePlanCase, BaseCaseRun
+from tcms.tests import BasePlanCase, BaseCaseRun, remove_perm_from_user
 from tcms.tests import user_should_have_perm
 from tcms.utils.permissions import initiate_user_with_default_setups
+
+
+class TestGetTestCase(BaseCaseRun):
+    def test_test_case_is_shown(self):
+        url = reverse('testcases-get', args=[self.case_1.pk])
+        response = self.client.get(url)
+
+        # will not fail when running under different locale
+        self.assertEqual(HTTPStatus.OK, response.status_code)
 
 
 class TestGetCaseRunDetailsAsDefaultUser(BaseCaseRun):
@@ -28,12 +39,12 @@ class TestGetCaseRunDetailsAsDefaultUser(BaseCaseRun):
         # test for https://github.com/kiwitcms/Kiwi/issues/74
         initiate_user_with_default_setups(self.tester)
 
-        url = reverse('caserun-detail-pane', args=[self.case_run_1.case_id])
+        url = reverse('caserun-detail-pane', args=[self.execution_1.case_id])
         response = self.client.get(
             url,
             {
-                'case_run_id': self.case_run_1.pk,
-                'case_text_version': self.case_run_1.case.history.latest().history_id,
+                'case_run_id': self.execution_1.pk,
+                'case_text_version': self.execution_1.case.history.latest().history_id,
             }
         )
 
@@ -45,27 +56,28 @@ class TestGetCaseRunDetailsAsDefaultUser(BaseCaseRun):
             'rows="10">\n</textarea>',
             html=True)
 
-        for status in TestCaseRunStatus.objects.all():
-            self.assertContains(
-                response,
-                "<input type=\"submit\" class=\"btn btn_%s btn_status js-status-button\" "
-                "title=\"%s\"" % (status.name.lower(), status.name),
-                html=False
-            )
+        with override('en'):
+            for status in TestExecutionStatus.objects.all():
+                self.assertContains(
+                    response,
+                    "<input type=\"submit\" class=\"btn btn_%s btn_status js-status-button\" "
+                    "title=\"%s\"" % (status.name.lower(), status.name),
+                    html=False
+                )
 
     def test_user_sees_bugs(self):
         bug_1 = BugFactory()
         bug_2 = BugFactory()
 
-        self.case_run_1.add_bug(bug_1.bug_id, bug_1.bug_system.pk)
-        self.case_run_1.add_bug(bug_2.bug_id, bug_2.bug_system.pk)
+        self.execution_1.add_bug(bug_1.bug_id, bug_1.bug_system.pk)
+        self.execution_1.add_bug(bug_2.bug_id, bug_2.bug_system.pk)
 
-        url = reverse('caserun-detail-pane', args=[self.case_run_1.case.pk])
+        url = reverse('caserun-detail-pane', args=[self.execution_1.case.pk])
         response = self.client.get(
             url,
             {
-                'case_run_id': self.case_run_1.pk,
-                'case_text_version': self.case_run_1.case.history.latest().history_id,
+                'case_run_id': self.execution_1.pk,
+                'case_text_version': self.execution_1.case.history.latest().history_id,
             }
         )
 
@@ -118,6 +130,88 @@ class TestMultipleEmailField(unittest.TestCase):
         self.field.required = False
         data = self.field.clean(value)
         self.assertEqual(data, [])
+
+
+class TestNewCase(BasePlanCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+
+        cls.new_case_url = reverse('testcases-new')
+
+        cls.summary = 'summary'
+        cls.text = 'some text description'
+        cls.script = 'some script'
+        cls.arguments = 'args1, args2, args3'
+        cls.requirement = 'requirement'
+        cls.link = 'http://somelink.net'
+        cls.notes = 'notes'
+        cls.data = {
+            'summary': cls.summary,
+            'default_tester': cls.tester.pk,
+            'product': cls.case.category.product.pk,
+            'category': cls.case.category.pk,
+            'case_status': cls.case_status_confirmed.pk,
+            'priority': cls.case.priority.pk,
+            'text': cls.text,
+            'script': cls.script,
+            'arguments': cls.arguments,
+            'requirement': cls.requirement,
+            'extra_link': cls.link,
+            'notes': cls.notes
+        }
+
+        user_should_have_perm(cls.tester, 'testcases.add_testcase')
+
+    def test_create_test_case_successfully(self):
+        response = self.client.post(self.new_case_url, self.data)
+
+        test_case = TestCase.objects.get(summary=self.summary)
+        redirect_url = reverse('testcases-get', args=[test_case.pk])
+
+        self.assertRedirects(response, redirect_url)
+        self._assertTestCase(test_case)
+
+    def test_create_test_case_successfully_from_plan(self):
+        self.data['from_plan'] = self.plan.pk
+
+        response = self.client.post(self.new_case_url, self.data)
+
+        test_case = TestCase.objects.get(summary=self.summary)
+        redirect_url = "{0}?from_plan={1}".format(
+            reverse('testcases-get', args=[test_case.pk]), self.plan.pk
+        )
+
+        self.assertRedirects(response, redirect_url)
+        self.assertEqual(test_case.plan.get(), self.plan)
+        self.assertEqual(TestCasePlan.objects.filter(case=test_case, plan=self.plan).count(), 1)
+        self._assertTestCase(test_case)
+
+    def test_create_test_case_without_permissions(self):
+        remove_perm_from_user(self.tester, 'testcases.add_testcase')
+
+        response = self.client.post(self.new_case_url, self.data)
+        redirect_url = "{0}?next={1}".format(
+            reverse('tcms-login'), reverse('testcases-new')
+        )
+
+        self.assertRedirects(response, redirect_url)
+        # assert test case has not been created
+        self.assertEqual(TestCase.objects.filter(summary=self.summary).count(), 0)
+
+    def _assertTestCase(self, test_case):
+        self.assertEqual(test_case.summary, self.summary)
+        self.assertEqual(test_case.category, self.case.category)
+        self.assertEqual(test_case.default_tester, self.tester)
+        self.assertEqual(test_case.case_status, self.case_status_confirmed)
+        self.assertEqual(test_case.priority, self.case.priority)
+        self.assertEqual(test_case.text, self.text)
+        self.assertEqual(test_case.script, self.script)
+        self.assertEqual(test_case.arguments, self.arguments)
+        self.assertEqual(test_case.requirement, self.requirement)
+        self.assertEqual(test_case.extra_link, self.link)
+        self.assertEqual(test_case.notes, self.notes)
 
 
 class TestEditCase(BasePlanCase):
@@ -191,66 +285,6 @@ class TestEditCase(BasePlanCase):
         edited_case = TestCase.objects.get(pk=self.case_1.pk)
         self.assertEqual(new_summary, edited_case.summary)
 
-    def test_continue_edit_this_case_after_save(self):
-        edit_data = self.edit_data.copy()
-        edit_data['_continue'] = 'continue edit'
-
-        response = self.client.post(self.case_edit_url, edit_data)
-
-        redirect_url = '{0}?from_plan={1}'.format(
-            reverse('testcases-edit', args=[self.case_1.pk]),
-            self.plan.pk,
-        )
-        self.assertRedirects(response, redirect_url)
-
-    def test_continue_edit_next_confirmed_case_after_save(self):
-        edit_data = self.edit_data.copy()
-        edit_data['_continuenext'] = 'continue edit next case'
-
-        response = self.client.post(self.case_edit_url, edit_data)
-
-        redirect_url = '{0}?from_plan={1}'.format(
-            reverse('testcases-edit', args=[self.case_2.pk]),
-            self.plan.pk,
-        )
-        self.assertRedirects(response, redirect_url)
-
-    def test_continue_edit_next_non_confirmed_case_after_save(self):
-        edit_data = self.edit_data.copy()
-        edit_data['case_status'] = self.case_status_proposed.pk
-        edit_data['_continuenext'] = 'continue edit next case'
-
-        response = self.client.post(self.case_edit_url, edit_data)
-
-        redirect_url = '{0}?from_plan={1}'.format(
-            reverse('testcases-edit', args=[self.proposed_case.pk]),
-            self.plan.pk,
-        )
-        self.assertRedirects(response, redirect_url)
-
-    def test_return_to_plan_confirmed_cases_tab(self):
-        edit_data = self.edit_data.copy()
-        edit_data['_returntoplan'] = 'return to plan'
-
-        response = self.client.post(self.case_edit_url, edit_data)
-
-        redirect_url = '{0}#testcases'.format(
-            reverse('test_plan_url_short', args=[self.plan.pk])
-        )
-        self.assertRedirects(response, redirect_url, target_status_code=301)
-
-    def test_return_to_plan_review_cases_tab(self):
-        edit_data = self.edit_data.copy()
-        edit_data['case_status'] = self.case_status_proposed.pk
-        edit_data['_returntoplan'] = 'return to plan'
-
-        response = self.client.post(self.case_edit_url, edit_data)
-
-        redirect_url = '{0}#reviewcases'.format(
-            reverse('test_plan_url_short', args=[self.plan.pk])
-        )
-        self.assertRedirects(response, redirect_url, target_status_code=301)
-
 
 class TestPrintablePage(BasePlanCase):
     """Test printable page view method"""
@@ -297,7 +331,7 @@ class TestCloneCase(BasePlanCase):
         # Refuse to clone cases if missing selectAll and case arguments
         response = self.client.get(self.clone_url, {}, follow=True)
 
-        self.assertContains(response, 'At least one TestCase is required')
+        self.assertContains(response, _('At least one TestCase is required'))
 
     def test_show_clone_page_with_from_plan(self):
         response = self.client.get(self.clone_url,
@@ -307,9 +341,9 @@ class TestCloneCase(BasePlanCase):
         self.assertContains(
             response,
             """<div>
-    <input type="radio" id="id_use_sameplan" name="selectplan" value="{0}">
-    <label for="id_use_sameplan" class="strong">Use the same Plan -- {0} : {1}</label>
-</div>""".format(self.plan.pk, self.plan.name),
+    <input type="radio" id="id_use_sameplan" name="selectplan" value="%s">
+    <label for="id_use_sameplan" class="strong">%s -- %s : %s</label>
+</div>""" % (self.plan.pk, _('Use the same Plan'), self.plan.pk, self.plan.name),
             html=True)
 
         for loop_counter, case in enumerate([self.case_1, self.case_2]):
@@ -361,7 +395,7 @@ class TestGetCasesFromPlan(BasePlanCase):
 
     def test_casetags_are_shown_in_template(self):
         # pylint: disable=tag-objects-get_or_create
-        tag, _ = Tag.objects.get_or_create(name='Linux')
+        tag, _created = Tag.objects.get_or_create(name='Linux')
         self.case.add_tag(tag)
 
         url = reverse('testcases-all')
@@ -374,7 +408,7 @@ class TestGetCasesFromPlan(BasePlanCase):
                                     content_type='application/x-www-form-urlencoded; charset=UTF-8',
                                     HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         self.assertEqual(HTTPStatus.OK, response.status_code)
-        self.assertContains(response, 'Tags:')
+        self.assertContains(response, _('Tags'))
         self.assertContains(response, '<a href="#testcases">Linux</a>')
 
     def test_disabled_priority_now_shown(self):

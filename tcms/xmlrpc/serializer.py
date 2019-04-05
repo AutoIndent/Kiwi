@@ -46,6 +46,7 @@ def timedelta_to_str(value):
 # ## End of functions ###
 
 
+# todo: start removing these classes in favor of tcms.core.serializer
 class XMLRPCSerializer:
     """
     Django XMLRPC Serializer
@@ -340,7 +341,8 @@ class QuerySetBasedXMLRPCSerializer(XMLRPCSerializer):
 
         - Get data from database using QuerySet.values method
         - Transfer data to the output destiation according to serialization
-          standard, where two things must be done,
+          standard, where two things must be done:
+
           - field name must be replaced with right name rather than the
             internal name used for SQL query
           - some data must be converted in proper type. Currently, data with
@@ -416,7 +418,7 @@ class TestPlanXMLRPCSerializer(QuerySetBasedXMLRPCSerializer):
     m2m_fields = ('case', 'tag')
 
 
-class TestCaseRunXMLRPCSerializer(QuerySetBasedXMLRPCSerializer):
+class TestExecutionXMLRPCSerializer(QuerySetBasedXMLRPCSerializer):
     """XMLRPC serializer specific for TestCaseRun"""
 
     values_fields_mapping = {

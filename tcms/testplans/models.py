@@ -94,15 +94,22 @@ class TestPlan(TCMSActionModel):
     def confirmed_case(self):
         return self.case.filter(case_status__name='CONFIRMED')
 
-    def add_case(self, case, sortkey=0):
+    def add_case(self, case, sortkey=None):
 
-        tcp, is_created = TestCasePlan.objects.get_or_create(
+        if sortkey is None:
+            lastcase = self.testcaseplan_set.order_by('-sortkey').first()
+            if lastcase and lastcase.sortkey is not None:
+                sortkey = lastcase.sortkey + 10
+            else:
+                sortkey = 0
+
+        return TestCasePlan.objects.get_or_create(
             plan=self,
             case=case,
-        )
-        if is_created:
-            tcp.sortkey = sortkey
-            tcp.save()
+            defaults={
+                'sortkey': sortkey
+            }
+        )[0]
 
     def add_tag(self, tag):
         return TestPlanTag.objects.get_or_create(
@@ -247,9 +254,8 @@ class TestPlanTag(models.Model):
 
 class TestPlanEmailSettings(models.Model):
     plan = models.OneToOneField(TestPlan, related_name='email_settings', on_delete=models.CASCADE)
-    is_active = models.BooleanField(default=False)
-    auto_to_plan_author = models.BooleanField(default=False)
-    auto_to_case_owner = models.BooleanField(default=False)
-    auto_to_case_default_tester = models.BooleanField(default=False)
-    notify_on_plan_update = models.BooleanField(default=False)
-    notify_on_case_update = models.BooleanField(default=False)
+    auto_to_plan_author = models.BooleanField(default=True)
+    auto_to_case_owner = models.BooleanField(default=True)
+    auto_to_case_default_tester = models.BooleanField(default=True)
+    notify_on_plan_update = models.BooleanField(default=True)
+    notify_on_case_update = models.BooleanField(default=True)
