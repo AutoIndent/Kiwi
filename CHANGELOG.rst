@@ -1,6 +1,141 @@
 Change Log
 ==========
 
+Kiwi TCMS 6.8 (03 May 2019)
+---------------------------
+
+**IMPORTANT:** this is a small improvement and bug-fix update.
+Supported upgrade paths::
+
+    5.3   (or older) -> 5.3.1
+    5.3.1 (or newer) -> 6.0.1
+    6.0.1            -> 6.1
+    6.1              -> 6.1.1
+    6.1.1            -> 6.2 (or newer)
+
+After upgrade don't forget to::
+
+    ./manage.py migrate
+
+
+Improvements
+~~~~~~~~~~~~
+
+- Update Django from 2.2 to 2.2.1
+- Update django-simple-history from 2.7.0 to 2.7.2
+- Update django-grappelli from 2.12.2 to 2.12.3
+- Update psycopg2 from 2.8 to 2.8.2
+- Update pygithub from 1.43.6 to 1.43.7
+- Upgrade pip and setuptools inside Docker image
+- Update documentation with newer screenshots and updated Tutotial. Fixes
+  `Issue #837 <https://github.com/kiwitcms/Kiwi/issues/837/>`_ (@Prome88)
+- Document how to enable public read-only views
+- Remove deprecated documentation section about Bugzilla authentication
+- Install PostgreSQL libraries in Docker image which makes it easier to
+  switch the DB backend without rebuilding the entire image
+- Remove npm, libxml2-devel and libxslt-devel from Docker image
+- Database engine configuration now respects the ``KIWI_DB_ENGINE`` environment
+  variable which defaults to ``django.db.backends.mysql``. This will make it
+  easier for admins to change DB engine by updating their ``docker-compose.yml``
+
+
+Bug fixes
+~~~~~~~~~
+
+- Pin bootstrap-switch to version 3.3.4 in ``package.json``. Fixes
+  `Issue #916 <https://github.com/kiwitcms/Kiwi/issues/916/>`_
+
+
+Translations
+~~~~~~~~~~~~
+
+- Updated `French translation <https://crowdin.com/project/kiwitcms/fr#>`_
+- Updated `Slovenian translation <https://crowdin.com/project/kiwitcms/sl#>`_
+- Updated `Russian translation <https://crowdin.com/project/kiwitcms/ru#>`_
+- New language `Czech <https://crowdin.com/project/kiwitcms/cz#>`_
+
+
+Refactoring
+~~~~~~~~~~~
+
+- Don't use ``Site.objects.get_current()`` because it has an internal cache
+  and causes email notifications from tenants to use the wrong URL
+- More changes around renaming of TestCaseRun to TestExecution
+
+
+
+Kiwi TCMS 6.7 (06 April 2019)
+-----------------------------
+
+**IMPORTANT:** this is a small improvement and bug-fix update.
+Supported upgrade paths::
+
+    5.3   (or older) -> 5.3.1
+    5.3.1 (or newer) -> 6.0.1
+    6.0.1            -> 6.1
+    6.1              -> 6.1.1
+    6.1.1            -> 6.2 (or newer)
+
+After upgrade don't forget to::
+
+    ./manage.py migrate
+
+
+Improvements
+~~~~~~~~~~~~
+
+- Update Django from 2.1.7 to 2.2
+- Update markdown from 3.0.1 to 3.1
+- Update psycopg2 from 2.7.7 to 2.8
+- Update pygithub from 1.43.5 to 1.43.6
+- Update bleach-whitelist from 0.0.9 to 0.0.10
+- Update marked(.js) to version 0.6.2
+- Support arbitrary depth for ``MENU_ITEMS`` setting
+- Support auto-discovery of 3rd party Telemetry plugins, see
+  `documentation <https://kiwitcms.readthedocs.io/en/latest/telemetry/index.html>`_
+
+
+Database migrations
+~~~~~~~~~~~~~~~~~~~
+
+- Rename ``TestCaseRun`` to ``TestExecution`` including renaming existing
+  permissions
+- Rename ``TestCaseRunStatus`` to ``TestExecutionStatus``
+
+
+API
+~~~
+
+- Rename ``TestCaseRun.*`` to ``TestExecution.*``
+- Rename ``TestCaseRunStatus.*`` to ``TestExecution.*``
+- This version keeps the old names for backwards compatibility reasons but they
+  will be removed in
+  `Issue #889 <https://github.com/kiwitcms/Kiwi/issues/889>`_
+
+
+Bug fixes
+~~~~~~~~~
+
+- Prompt user before deleting attachments. Fixes
+  `Issue #867 <https://github.com/kiwitcms/Kiwi/issues/867>`_ (Martin Jordanov)
+- ``email_case_deletion()`` format error fixed so notifications when
+  test cases are deleted are not sent (Rik)
+
+
+Refactoring
+~~~~~~~~~~~
+
+- Remove unused images
+- Install ``node_modules/`` under ``tcms/`` and include it inside PyPI tarball
+
+
+Translations
+~~~~~~~~~~~~
+
+- Updated `Slovenian translation <https://crowdin.com/project/kiwitcms/sl#>`_
+
+
+
 Kiwi TCMS 6.6 (19 Mar 2019)
 ---------------------------
 
